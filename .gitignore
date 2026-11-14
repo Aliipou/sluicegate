@@ -39,3 +39,6 @@ formal/tlc_run_verify.log
 _pytest_full.txt
 _exp_*.txt
 _*.log
+
+# Lean build output
+.lake/
