@@ -136,7 +136,7 @@ Plus the strict variant: machine→human dominion is structurally impossible.
 |--------|-----------|
 | Code (Rust)   | `freedom-kernel/src/tcb/dag.rs:101` (`(rights & !parent.rights) != 0` → reject) |
 | Code (Python) | `src/authgate/kernel/registry.py:_delegation_chain_valid()` + `verify()` machine-dominion check |
-| Lean theorem  | `attenuation_cannot_escalate` in `MultiAgent.lean:38` (proved) |
+| Lean theorem  | `MultiAgent.attenuated_trans` / `no_write_escalation` and `Chain.walk_rights` (proved) |
 | Lean theorem  | `rights_sufficiency_correct` (proved by simp) |
 | Kani harness  | `prop_attenuation_two_node` (✓ proved) |
 | Kani harness  | `prop_machine_governs_human_blocked` (✓ proved) |
@@ -168,7 +168,7 @@ These are not axioms but properties that follow from the construction:
 
 | Property | Statement | Proof |
 |----------|-----------|-------|
-| **Determinism** | Same inputs → same output | `verify_deterministic` (Lean, by rfl) for Rust TCB. Python: NOT pure (documented C-4 in `FINDINGS.md`). |
+| **Determinism** | Same inputs → same output | Kani harness `prop_permitted_deterministic` for the Rust TCB (the vacuous Lean `rfl` theorem was removed). Python: NOT pure (documented C-4 in `FINDINGS.md`). |
 | **Permitted ⇒ no violations** | If `permitted=true` then `violations = ()` | `permitted_implies_no_forbidden_flag` (Lean) + `prop_permitted_implies_no_violations` (Kani) |
 | **Denied ⇒ reason non-empty** | If `permitted=false` then `violations ≠ ()` | `prop_blocked_implies_violations_non_empty` (Kani) |
 | **High-water mark** | `SequenceContext.accumulated_rights` is monotone | `prop_seq_accumulated_monotone` (Kani) |

@@ -34,12 +34,12 @@ what an actual `lake build` confirms, not what CI silently assumed.
 
 | Book element | Code | Formal artifact | Honest status |
 |---|---|---|---|
-| **A4** machine must have a human owner | `registry.register_machine`, `engine::verify` | `kani_proofs.rs::prop_ownerless_machine_blocked`; Lean `TCB.lean::ownerless_machine_must_have_owner` is `True := trivial` | **Kani✓**, Lean-stub |
+| **A4** machine must have a human owner | `registry.register_machine`, `engine::verify` | `kani_proofs.rs::prop_ownerless_machine_blocked`; Lean `TCB.lean::ownerless_machine_blocked` (real, over `verifyCore`) | **Kani✓, Lean✓** |
 | **A6** no machine governs a human | `engine::verify` | `kani_proofs.rs::prop_machine_governs_human_blocked`; Lean `machine_cannot_govern_human` is `True := trivial` | **Kani✓**, Lean-stub |
 | **A5 / A7** delegated, attenuated scope (child ⊆ parent) | `dag.rs`, `multi_agent.rs` | Lean `MultiAgent.lean::attenuation_cannot_escalate`, `attenuation_transitive`, `delegation_depth_bounded` | **Lean✓** (the strongest real proofs here) |
 | **Forbidden actions** sovereignty / coercion / deception → block | `engine::verify` flags; `verifier.py L148–160` | Lean `TCB.lean::forbidden_flags_always_block`, `sovereignty_flag_blocks`, `coercion_flag_blocks`, `deception_flag_blocks` (`by simp`); Kani `prop_plan_permitted_means_no_forbidden_flags` | **Lean✓ but shallow** — proves "flag set ⇒ Blocked", i.e. *enforcement of a declared flag*, **not detection** of the condition |
 | **Corrigibility from ownership** (`resists_human_correction`, `disables_corrigibility`) | `verifier.py L150,152` flags | covered by `forbidden_flags_always_block` | **Lean✓ but shallow** (same flag-enforcement caveat) |
-| **Determinism** (anti-dialectical: same input → same output) | `engine::verify` is a pure total fn | Lean `verify_deterministic := rfl` | **Vacuous** — `rfl` proves `f a = f a`. The real property (purity/totality) holds structurally but is **not** what this theorem demonstrates |
+| **Determinism** (anti-dialectical: same input → same output) | `engine::verify` is a pure total fn | Kani `prop_permitted_deterministic` | **Kani✓** — the vacuous Lean `rfl` theorem was removed |
 | **Epoch revocation** | `registry` epoch, `engine` epoch gate | Lean `Temporal.lean` (`epoch_gate_total`, `stale_epoch_implies_deny`) | **Lean✓** |
 | **A3** human property rights / ontology | `entities.ResourceType`, `RightsClaim` | — | **Code-only** |
 | **A2** no human owns another human | structural: no human→human ownership edge exists | — | **Code-only** (by construction) |

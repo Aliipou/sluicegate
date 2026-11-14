@@ -48,7 +48,7 @@ Primary sources: live attack demonstrations, source code inspection, runtime mea
 - File: `src/authgate/kernel/verifier.py`, `formal/INCOMPLETENESS.md`
 - Fix: added impurity note to `verify()` docstring;
   `formal/INCOMPLETENESS.md` now has explicit "Formal scope: Rust TCB only" section
-- Reason: Lean4 `verify_deterministic` theorem covers `engine.rs` (pure).
+- Reason: Kani harness `prop_permitted_deterministic` covers `engine.rs` (pure).
   Python `verify()` writes to `_audit_log` and `_tracer` — formally it's a different function.
 - For pure-function guarantees: use Rust backend (`authgate.health_check()` reports backend).
 

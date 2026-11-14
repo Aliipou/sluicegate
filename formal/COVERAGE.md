@@ -62,7 +62,7 @@ Located in `formal/lean4/` (see `Proofs.lean`):
 | Theorem                          | Statement                                                                  |
 |----------------------------------|----------------------------------------------------------------------------|
 | `forbidden_implies_blocked`      | Any action with a forbidden flag cannot be permitted                       |
-| `verify_deterministic`           | Same input → same output; no hidden state                                  |
+| `prop_permitted_deterministic` (Kani) | Same input → same output; no hidden state                                  |
 | `attenuation_transitive`         | If B ⊆ A and C ⊆ B then C ⊆ A (chain attenuation)                        |
 | `rights_sufficiency_correct`     | required ⊆ cap.rights ↔ rights check passes                               |
 | `epoch_gate_total`               | cap.epoch < min ∨ min ≤ cap.epoch — no third case                         |

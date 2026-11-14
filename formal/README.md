@@ -90,7 +90,7 @@ cd formal/lean4/FreedomKernel && lake build
 |--------|--------|
 | `TCB.lean` | Proved (forbidden flags, determinism) |
 | `Temporal.lean` | `taint_monotone` proved |
-| `MultiAgent.lean` | `attenuation_cannot_escalate` proved |
+| `MultiAgent.lean` | `attenuated_trans`, `no_*_escalation`, `withDepth_le` proved |
 | `Scope.lean` | T-SC1..T-SC5 proved; no `sorry` (checked by `check_axioms.lean` in CI) |
 | `Authgate/Proofs.lean` | `forged_revocation_harmless` proved (a theorem, not an axiom). No signature axiom: the proofs hold at the abstract capability level |
 
