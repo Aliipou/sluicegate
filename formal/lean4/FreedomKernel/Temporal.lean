@@ -33,7 +33,13 @@ theorem taint_monotone (current new_read : Label) :
 -- part of `verify_plan`. Gap: the per-action kernel gate (engine::verify) that
 -- verify_plan also runs is not modelled here (see TCB.lean `verifyCore`).
 
+/-- Taint side: fail closed, an unrecognised non-empty label ranks SECRET. -/
 def labelRankS (s : String) : Nat :=
+  if s = "SECRET" then 2 else if s = "INTERNAL" then 1
+  else if s = "" ∨ s = "PUBLIC" then 0 else 2
+
+/-- Sink side (`sink_rank`): an unrecognised write target ranks PUBLIC, the most restrictive sink. -/
+def sinkRankS (s : String) : Nat :=
   if s = "SECRET" then 2 else if s = "INTERNAL" then 1 else 0
 
 def highestS (cur : String) (ls : List String) : String :=
@@ -67,7 +73,7 @@ theorem highestS_ge_mem (cur : String) (ls : List String) (x : String) (hx : x �
 /-- StateProjection::advance: empty labels are skipped on both sides. -/
 def advance (t : String) (reads writes : List String) : Option String :=
   if writes.any (fun w => w != "" &&
-      decide (labelRankS (highestS t (reads.filter (fun r => r != ""))) > labelRankS w))
+      decide (labelRankS (highestS t (reads.filter (fun r => r != ""))) > sinkRankS w))
   then none
   else some (highestS t (reads.filter (fun r => r != "")))
 
@@ -97,7 +103,7 @@ theorem advance_covers_reads {t t' x : String} {r w : List String}
 /-- No write lands below the taint accumulated so far. -/
 theorem advance_no_downward_write {t t' y : String} {r w : List String}
     (h : advance t r w = some t') (hy : y ∈ w) (hne : y ≠ "") :
-    labelRankS t' ≤ labelRankS y := by
+    labelRankS t' ≤ sinkRankS y := by
   unfold advance at h
   split at h
   · cases h
@@ -122,7 +128,7 @@ theorem verifyPlan_append (t : String) (pre post : List (List String × List Str
 
 theorem plan_writes_above_start (t tf : String) (ss : List (List String × List String))
     (h : verifyPlan t ss = some tf) :
-    ∀ s ∈ ss, ∀ y ∈ s.2, y ≠ "" → labelRankS t ≤ labelRankS y := by
+    ∀ s ∈ ss, ∀ y ∈ s.2, y ≠ "" → labelRankS t ≤ sinkRankS y := by
   induction ss generalizing t with
   | nil => intro s hs; cases hs
   | cons s ss ih =>
@@ -147,7 +153,7 @@ theorem plan_no_downflow (t tf : String) (pre post : List (List String × List S
     (r w : List String) (h : verifyPlan t (pre ++ (r, w) :: post) = some tf)
     (x : String) (hx : x ∈ r) (hxne : x ≠ "")
     (y : String) (hy : y ∈ w ∨ ∃ s ∈ post, y ∈ s.2) (hyne : y ≠ "") :
-    labelRankS x ≤ labelRankS y := by
+    labelRankS x ≤ sinkRankS y := by
   obtain ⟨tm, _, hrest⟩ := verifyPlan_append t pre ((r, w) :: post) tf h
   simp only [verifyPlan] at hrest
   cases ha : advance tm r w with
@@ -159,11 +165,15 @@ theorem plan_no_downflow (t tf : String) (pre post : List (List String × List S
     · have := advance_no_downward_write ha hy hyne; omega
     · have := plan_writes_above_start t' tf post hrest s hs y hy hyne; omega
 
-/-- NON-GUARANTEE (records a fail-open in planner.rs): an unknown label ranks as
-PUBLIC, so reading "CONFIDENTIAL" data adds no taint and a later PUBLIC write
-is allowed. Flip this when label_rank fails closed. -/
-theorem unknown_label_fails_open :
-    verifyPlan "PUBLIC" [(["CONFIDENTIAL"], []), ([], ["PUBLIC"])] = some "PUBLIC" := by
+/-- Fail closed: reading an unknown label taints as SECRET, so a later PUBLIC
+write is rejected. -/
+theorem unknown_label_fails_closed :
+    verifyPlan "PUBLIC" [(["CONFIDENTIAL"], []), ([], ["PUBLIC"])] = none := by
+  decide
+
+/-- Fail closed on the sink side: SECRET data cannot flow into an unknown sink. -/
+theorem unknown_sink_fails_closed :
+    verifyPlan "PUBLIC" [(["SECRET"], []), ([], ["CONFIDENTIAL"])] = none := by
   decide
 
 end FreedomKernel.Temporal
