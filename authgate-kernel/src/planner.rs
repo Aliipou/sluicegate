@@ -9,7 +9,15 @@ use crate::wire::{ActionWire, OwnershipRegistryWire, VerificationResultWire};
 // ── Taint helpers ────────────────────────────────────────────────────────────
 
 // PUBLIC < INTERNAL < SECRET
+// Fail closed: a non-empty label we do not recognise is treated as SECRET when it
+// taints (read side). Empty / "PUBLIC" rank 0.
 fn label_rank(s: &str) -> u8 {
+    match s { "SECRET" => 2, "INTERNAL" => 1, "" | "PUBLIC" => 0, _ => 2 }
+}
+
+// Sink side: an unrecognised non-empty write target is treated as PUBLIC (rank 0),
+// the most restrictive sink, so tainted data cannot flow into it.
+fn sink_rank(s: &str) -> u8 {
     match s { "SECRET" => 2, "INTERNAL" => 1, _ => 0 }
 }
 
@@ -23,7 +31,7 @@ fn highest_label(current: &str, new_labels: &[String]) -> String {
 
 // PROOF: label_dominates(a, b) → rank(a) > rank(b); strict so equal labels are not violations
 fn label_dominates(taint: &str, target: &str) -> bool {
-    label_rank(taint) > label_rank(target)
+    label_rank(taint) > sink_rank(target)
 }
 
 // ── StateProjection ──────────────────────────────────────────────────────────
@@ -162,6 +170,20 @@ pub fn verify_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_label_ranks_secret_as_taint() {
+        assert_eq!(label_rank("CONFIDENTIAL"), 2);
+        assert_eq!(label_rank("PUBLIC"), 0);
+        assert_eq!(label_rank(""), 0);
+        assert_eq!(label_rank("INTERNAL"), 1);
+    }
+
+    #[test]
+    fn unknown_label_is_restrictive_sink() {
+        assert!(label_dominates("INTERNAL", "CONFIDENTIAL"));
+        assert!(!label_dominates("PUBLIC", "CONFIDENTIAL"));
+    }
     use crate::wire::{ClaimWire, EntityKind, EntityWire, MachineOwnerWire, ResourceWire};
 
     fn human(name: &str) -> EntityWire {
