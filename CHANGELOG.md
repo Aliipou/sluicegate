@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Formal: removed six Lean theorems that held for any input; added `Composition.lean` (veto lattice) and `Chain.lean` (delegation chain), and made the axiom guard fail on vacuous, restated and tautological theorems. Authgate: deleted `rights_sufficiency_correct` (restated its hypothesis).
+- Planner: unknown IFC labels now fail closed (taint ranks SECRET, unknown sink ranks PUBLIC).
+- `verify_spawn` now checks `delegated_claims` against the parent's delegable claims (`SpawnError::ClaimNotHeld`).
+- Docs: READMEs rewritten; theorem names and counts updated.
+
 ### Added
 
 **FDK → Sluicegate boundary seam** — consume a Freedom Decision Kernel legitimacy

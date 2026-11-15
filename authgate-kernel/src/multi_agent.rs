@@ -72,6 +72,8 @@ pub enum SpawnError {
     KernelBlocked(VerificationResultWire),
     DepthExceeded { requested: u8, max: u8 },
     ParentNotMachine,
+    /// A delegated claim is not covered by a delegable claim held by the parent.
+    ClaimNotHeld { resource_id: String },
 }
 
 #[derive(Debug)]
@@ -125,6 +127,9 @@ pub fn spawn_to_action(req: &AgentSpawnRequest) -> ActionWire {
 /// 1. Parent's spawn action passes the kernel gate
 /// 2. Budget depth cap is ≤ MAX_DELEGATION_DEPTH
 /// 3. Parent is a MACHINE (humans don't spawn agents through this interface)
+/// 4. Every delegated claim is covered by a claim the parent holds with
+///    `can_delegate` and at least the same read/write/delegate rights
+///    (attenuation: a child can never receive more than its parent has)
 #[allow(clippy::result_large_err)]
 pub fn verify_spawn(
     registry: &OwnershipRegistryWire,
@@ -139,6 +144,21 @@ pub fn verify_spawn(
             requested: req.budget.max_delegation_depth,
             max: MAX_DELEGATION_DEPTH,
         });
+    }
+
+    for dc in &req.delegated_claims {
+        let covered = registry.claims.iter().any(|c| {
+            c.holder.name == req.parent.name && c.holder.kind == req.parent.kind
+                && c.resource.name == dc.resource_id
+                && c.resource.rtype == dc.resource_type
+                && c.can_delegate
+                && (c.can_read || !dc.can_read)
+                && (c.can_write || !dc.can_write)
+                && (c.can_delegate || !dc.can_delegate)
+        });
+        if !covered {
+            return Err(SpawnError::ClaimNotHeld { resource_id: dc.resource_id.clone() });
+        }
     }
 
     let action = spawn_to_action(req);
@@ -226,6 +246,50 @@ mod tests {
         };
         let result = verify_spawn(&registry, &req);
         assert!(matches!(result, Err(SpawnError::KernelBlocked(_))));
+    }
+
+    fn delegable_registry(parent: &str, child: &str, rw: bool) -> OwnershipRegistryWire {
+        let mut reg = owned_registry_with_ctx_claim(parent, child);
+        reg.claims.push(ClaimWire {
+            holder: machine(parent),
+            resource: ResourceWire {
+                name: "doc".to_string(), rtype: "file".to_string(), scope: String::new(),
+                is_public: false, ifc_label: String::new(), trust_domain: None,
+            },
+            can_read: true, can_write: rw, can_delegate: true,
+            confidence: 1.0, expires_at: None, trust_domain: None, delegation_depth: 0,
+        });
+        reg
+    }
+    fn dc(write: bool, delegate: bool) -> DelegatedClaim {
+        DelegatedClaim {
+            resource_id: "doc".to_string(), resource_type: "file".to_string(),
+            can_read: true, can_write: write, can_delegate: delegate,
+        }
+    }
+
+    #[test]
+    fn test_spawn_delegating_held_claim_permitted() {
+        let reg = delegable_registry("p", "c", false);
+        let req = AgentSpawnRequest { parent: machine("p"), child_id: "c".into(),
+            delegated_claims: vec![dc(false, false)], budget: AuthorityBudget::minimal() };
+        assert!(verify_spawn(&reg, &req).is_ok());
+    }
+
+    #[test]
+    fn test_spawn_cannot_delegate_unheld_claim() {
+        let reg = owned_registry_with_ctx_claim("p", "c");
+        let req = AgentSpawnRequest { parent: machine("p"), child_id: "c".into(),
+            delegated_claims: vec![dc(false, false)], budget: AuthorityBudget::minimal() };
+        assert!(matches!(verify_spawn(&reg, &req), Err(SpawnError::ClaimNotHeld { .. })));
+    }
+
+    #[test]
+    fn test_spawn_cannot_escalate_write() {
+        let reg = delegable_registry("p", "c", false);
+        let req = AgentSpawnRequest { parent: machine("p"), child_id: "c".into(),
+            delegated_claims: vec![dc(true, false)], budget: AuthorityBudget::minimal() };
+        assert!(matches!(verify_spawn(&reg, &req), Err(SpawnError::ClaimNotHeld { .. })));
     }
 
     #[test]
