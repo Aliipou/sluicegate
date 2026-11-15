@@ -26,15 +26,6 @@ theorem attenuation_transitive
     : Attenuated c a := by
   exact Finset.Subset.trans h2 h1
 
--- ─── Lemma: Rights sufficiency check is correct ──────────────────────────────
--- If cap.rights ⊇ required, then required ⊆ cap.rights (tautology, but stated
--- explicitly to match the Rust check: (cap.rights & required) == required).
-theorem rights_sufficiency_correct
-    (cap : CapProof) (required : Rights)
-    (h : required ⊆ cap.rights)
-    : SufficientRights ⟨0, 0, required, [], [], 0, 0⟩ cap := by
-  exact h
-
 -- ─── Lemma: Epoch gate is a total order check ────────────────────────────────
 -- cap.epoch < min_epoch → proof is stale, must be rejected.
 -- cap.epoch ≥ min_epoch → epoch condition satisfied.
