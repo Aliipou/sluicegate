@@ -1,4 +1,4 @@
-# Formal Specification — authgate-kernel
+# Formal specification
 
 Branch: `spec-core` | Track: Mathematical Truth
 
@@ -25,7 +25,7 @@ No code here compiles or deploys. Correctness is established by model checking
 | `COVERAGE.md` | Which invariants have TLC instances / Lean proofs |
 | `INCOMPLETENESS.md` | Known limits — proved vs `sorry` vs axioms (Gödel budget) |
 | `TLC_SETUP.md` | How to install `tla2tools.jar` and re-run TLC |
-| `lean4/FreedomKernel/` | Lean 4 modules (TCB, Scope, Temporal, MultiAgent, Incompleteness) |
+| `lean4/FreedomKernel/` | Lean 4 modules (TCB, Scope, Temporal, MultiAgent, Composition, Chain, Incompleteness) |
 | `plan_semantics.md` | Denotational semantics for capability plan IR |
 | `distributed/` | Distributed epoch / multi-node extension (research) |
 | `kani/` | Rust Kani verification stubs |
@@ -86,13 +86,19 @@ Build locally:
 cd formal/lean4/FreedomKernel && lake build
 ```
 
-| Module | Status |
-|--------|--------|
-| `TCB.lean` | Proved (forbidden flags, determinism) |
-| `Temporal.lean` | `taint_monotone` proved |
-| `MultiAgent.lean` | `attenuated_trans`, `no_*_escalation`, `withDepth_le` proved |
-| `Scope.lean` | T-SC1..T-SC5 proved; no `sorry` (checked by `check_axioms.lean` in CI) |
-| `Authgate/Proofs.lean` | `forged_revocation_harmless` proved (a theorem, not an axiom). No signature axiom: the proofs hold at the abstract capability level |
+| Module | What it proves |
+|--------|----------------|
+| `TCB.lean` | `verifyCore`: forbidden flags, `ownerless_machine_blocked`, `machine_cannot_govern_human`, `verifyCore_permitted_iff` |
+| `Temporal.lean` | IFC over plans: `advance_no_downward_write`, `plan_no_downflow`, `taint_monotone`; unknown labels fail closed (`unknown_label_fails_closed`, `unknown_sink_fails_closed`) |
+| `MultiAgent.lean` | `attenuated_trans`, `no_*_escalation`, `withDepth_le` |
+| `Composition.lean` | Veto-only verdict lattice: `meet`, `mintGate`, `non_amplification` |
+| `Chain.lean` | `validate_chain` model from `dag.rs`: 64-bit rights attenuation, depth limit 16, `walk_sound`, `walk_rights`, `walk_hops` |
+| `Scope.lean` | T-SC1..T-SC5 |
+| `Authgate/Proofs.lean` | `forged_revocation_harmless` and related lemmas (abstract capability level, no signature axiom) |
+
+Guard result (`run_axiom_guard.sh`): FreedomKernel 152 theorems, Authgate 19 theorems, 0 declared axioms, 0 violations. The count includes Lean-generated helper lemmas.
+
+Determinism of `verify` is checked by Kani (`prop_permitted_deterministic`), not Lean. Earlier Lean theorems that were true for any input (`verify_deterministic` by `rfl`, and others) were removed; the guard now fails the build on VACUOUS-THM, RESTATED and TAUTOLOGY.
 
 The link between that abstract level and a signed-token implementation is **not formalised**. `Ed25519.lean` on the unmerged `crypto-axiom-connection` branch is work toward it. The ontological-root axioms (A0) and their two consequences live on the `nazariye-azadi` branch, outside this development.
 

@@ -1,198 +1,76 @@
 # Sluicegate
 
-**[🟢 Live demo — verify a capability with the real compiled kernel, right in your browser](https://authgate-hub.vercel.app)**
+**A small, deterministic gate that decides whether an action is covered by a valid, signed capability.**
 
-**A capability-verification kernel: given an action and a set of signed capabilities, it deterministically returns Permit or Deny.**
-
-> **Scope.** Sluicegate decides *whether a presented action is covered by a valid, signed, non-revoked capability*. It does not, by itself, stop an action that bypasses the gate: that requires the process-isolation layer, which is a separate, partial mitigation with documented residuals. It does not infer intent, detect truth, or align model behaviour. See [NON_GOALS.md](NON_GOALS.md), [THREAT_MODEL.md](THREAT_MODEL.md) and [ASSUMPTIONS.md](ASSUMPTIONS.md) before relying on it.
-
-If an agent, planner, or service routes a request to read a file, call an API, or move money through the gate, Sluicegate checks one structural question first:
-
-> Does this actor hold a valid, signed, non-revoked capability for this resource and these rights?
-
-No valid proof → the action does not run. Same inputs always yield the same Permit or Deny. No LLM calls inside the gate. No probability scores.
-
-Not a LangChain plugin. Not model-specific. The product is a **wire format** plus a **verify function**. Framework adapters are convenience glue — when a framework goes away, the contract stays. See [POSITIONING.md](POSITIONING.md).
-
-**Constitution (book + philosopher edition):** [Aliipou/freedom-theory](https://github.com/Aliipou/freedom-theory). This repo is **authority** (Sluicegate TCB). It does not replace the legitimacy floor. Start there for A1–A7; start here for signed capability proofs.
-
-**Deployable verifier API:** [INFRA.md](INFRA.md) — Docker Compose, `/readyz`, admin-gated registry mutation, attenuating `/delegate`.
-
-```mermaid
-flowchart LR
-  D[Decision maker] --> G[CallGate / Sluicegate]
-  G -->|Permit| IO[Tool / IO]
-  G -->|Deny| A[Hash-chained audit]
-```
-
-![Authority path](docs/figures/gate_pipeline.png)
-
-![Verification evidence](docs/figures/verification_stack.png)
+Give it an action and a set of signed proofs. It returns `Permit` or `Deny`. Same inputs, same answer. No LLM calls, no scores, no network.
 
 [![CI](https://github.com/Aliipou/sluicegate/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Aliipou/sluicegate/actions)
-[![Formal](https://img.shields.io/badge/formal-TLC%2BLean%20CI-green.svg)](.github/workflows/formal.yml)
-[![Rust](https://img.shields.io/badge/kernel-Rust-orange.svg)](authgate-kernel/)
-[![Tests](https://img.shields.io/badge/tests-1300%2B%20passing-brightgreen.svg)](tests/)
-[![Kani](https://img.shields.io/badge/Kani-19%20harnesses-green.svg)](formal/)
-[![Lean4](https://img.shields.io/badge/Lean4-43%20theorems%2C%200%20sorry-blue.svg)](formal/lean4/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
-**Review / ops:** [REVIEW_PACKET.md](REVIEW_PACKET.md) · [ASSUMPTIONS.md](ASSUMPTIONS.md) · [INFRA.md](INFRA.md) · [INDUSTRY_READINESS.md](INDUSTRY_READINESS.md)
+[Live demo](https://authgate-hub.vercel.app) runs the compiled kernel in your browser.
 
----
+## The problem
 
-## What's new (Aug 2026)
+An agent, planner or service can ask to read a file, call an API or move money faster than a human can review. Most systems treat "it asked" as permission. Prompt tricks, framework bugs or a compromised sub-agent can then invent authority.
 
-**Engineering gap audit — closed.** All items from the original gap list are resolved or explicitly scoped (see [Engineering gaps](#engineering-gaps)). No open rows remain.
-
-**CI — all green** on branch `with-legitimacy` ([PR #8](https://github.com/Aliipou/sluicegate/pull/8) → `main`):
-
-| Workflow | What it verifies |
-|----------|------------------|
-| [CI](.github/workflows/ci.yml) | Rust clippy/tests, Python ruff/mypy/pytest, docker `/readyz`, red-team, adversarial simulation |
-| [Formal verification](.github/workflows/formal.yml) | TLC model check + Lean 4 `lake build` (FreedomKernel) |
-| [Seccomp enforcement](.github/workflows/seccomp.yml) | Linux adversarial: `execve` killed under read-only allowlist |
-| [Sandbox](.github/workflows/sandbox.yml) | WASM sandbox: write blocked with read-only rights |
-| TCB Test Suite | Full Rust TCB regression |
-
-**New enforcement & ops modules:**
-
-- `authgate-kernel/src/seccomp.rs` — rights-derived syscall allowlist (mirrors WASM bitmask)
-- `authgate-kernel/src/session_clock.rs` — monotonic session clock; rejects backward time jumps
-- `tests/test_seccomp_adversarial.py` — seccomp kill-test in CI
-
-**Formal system posture.** Every theorem in the audited Lean modules is proved, with no `sorry` and no axioms beyond Lean's own (`propext`, `Classical.choice`, `Quot.sound`). There are 43 hand-written theorems (source count of `theorem` declarations). This is enforced in CI by `formal/lean4/check_axioms.lean`, which fails the build on any unexpected axiom dependency, on any axiom declared but not allowlisted, and on any axiom whose conclusion is vacuous. The results are proved at the abstract capability level; the link between that level and the signed-token implementation is not yet formalised. The ontological-root axioms (A0) live on the `nazariye-azadi` branch, outside this development. Details: [formal/INCOMPLETENESS.md](formal/INCOMPLETENESS.md).
-
-**Industry readiness tiers** defined in [INDUSTRY_READINESS.md](INDUSTRY_READINESS.md) — T1 assurance-bounded through T4 production infra-ready. Current branch meets **T2 engineering-complete** (gaps closed + CI green); ops guides (KMS, DR, migration) land in T3/T4 docs.
-
-**Pending:** merge PR #8 to `main` so the default branch carries the same CI and gap closure.
-
----
-
-## Why this exists
-
-Autonomous systems increasingly decide *and* act. The decision step (LLM, planner, workflow) can propose tool calls faster than humans can review them. Most stacks still treat “the agent asked for it” as enough authority.
-
-That leaves a predictable failure mode: an actor executes IO without a cryptographically checkable proof that it was allowed to. Prompt framing, framework bugs, or a compromised sub-agent should not be able to invent authority.
-
-Sluicegate puts a small, deterministic gate on that arrow:
+Sluicegate puts one check in front of the action:
 
 ```text
-[Any decision-maker]  →  CallGate (verify capability proof)  →  [Any IO]
-                              ↓ if denied
-                         audit entry; action does not execute
+decision-maker  ->  Sluicegate (verify proof)  ->  tool / IO
+                          |
+                          +-- Deny: logged, action does not run
 ```
 
-Today the decision-maker is often an LLM agent. Tomorrow it may be a planner, a swarm, or another machine. The gate does not care — it only checks the proof.
+The check is one question: *does this actor hold a valid, signed, non-revoked capability for this resource and these rights?* If not, nothing runs.
 
----
+## What it gives you
 
-## What you get
-
-| Capability | What it means in practice |
+| Feature | In practice |
 |---|---|
-| **Signed capability chains** | Ed25519-signed proofs; identity bound as `subject_id = SHA-256(pubkey)` |
-| **Attenuation** | A child can only receive a subset of a parent’s rights — never amplify |
-| **Epoch revocation** | Raise `min_epoch` to invalidate a compromised cohort in O(1); no giant denylist required |
-| **Deterministic decisions** | Same action + same trust root + same time → same Permit/Deny |
-| **Tamper-evident audit** | Hash-chained log of gate decisions |
-| **Small Rust TCB** | Security-critical path is a few hundred LOC with `#![forbid(unsafe_code)]` |
-| **JSON wire contract** | Integrate by producing/consuming schemas — no framework lock-in |
-| **Partial formal coverage** | TLA+ model checked (safety), Kani harnesses, Lean 4 theorems — see honesty section below |
+| Signed capability chains | Ed25519 proofs. Identity is bound as `subject_id = SHA-256(pubkey)`. |
+| Attenuation | A delegated capability can only carry a subset of its parent's rights, never more. |
+| Epoch revocation | Raise `min_epoch` to invalidate a whole cohort in one step. No denylist to maintain. |
+| Deterministic decisions | Same action, same trust root, same time gives the same result. |
+| Tamper-evident audit | Every decision goes into a SHA-256 hash-chained log. |
+| Small trusted core | The Rust path that enforces decisions is a few hundred lines with `#![forbid(unsafe_code)]`. |
+| JSON wire contract | Integrate through schemas, not a framework. |
 
-**Wire schemas (the integration contract):**
+Wire schemas: [`spec/canonical_action.schema.json`](spec/canonical_action.schema.json) (what you submit), [`spec/gate_result.schema.json`](spec/gate_result.schema.json) (what you get back), [`spec/audit_entry.schema.json`](spec/audit_entry.schema.json) (what is logged).
 
-- [`spec/canonical_action.schema.json`](spec/canonical_action.schema.json) — what you submit
-- [`spec/gate_result.schema.json`](spec/gate_result.schema.json) — what you receive
-- [`spec/audit_entry.schema.json`](spec/audit_entry.schema.json) — what gets logged
-
-Adapters for LangChain, OpenAI Agents SDK, Anthropic, AutoGen, CrewAI, LangGraph, DSPy, and MCP live under `src/authgate/adapters/` as **optional conveniences**, not as the product.
-
-This is the same family of idea as capability-based OS security (seL4, CHERI), applied to agent tool execution rather than to syscalls.
-
----
-
-## How it compares (honestly)
-
-Sluicegate is **not** “a better OPA.” General policy engines already answer *“is this principal allowed to do this action on this resource right now?”* Cedar is formally verified as a policy language; Zanzibar / OpenFGA scale relationship-based access; OPA’s Rego is highly expressive. We do not claim to replace those systems for service mesh, cloud IAM, or classic ABAC.
-
-What we *do* claim, based on a written comparative evaluation ([COMPARATIVE_EVALUATION.md](COMPARATIVE_EVALUATION.md), kill-tests in [WHY_NOT_OPA.md](WHY_NOT_OPA.md) / [WHY_NOT_DLP.md](WHY_NOT_DLP.md)):
-
-| System | Strength | Gap relative to agent tool gates |
-|---|---|---|
-| **OPA / Rego** | Flexible policy language for services | Not built around signed capability *delegation chains*; formal verification of the interpreter is not the product story |
-| **AWS Cedar** | Formally verified *authorization language* | Point-in-time allow/deny; no agent-oriented capability DAG + epoch cohort revoke as first-class primitives |
-| **Zanzibar / OpenFGA** | Global ReBAC; revocation via tuple delete | Excellent relationship graphs; not a per-tool-call capability proof + attenuation lattice for agent runtimes |
-| **DLP / lineage / PBAC** | Catch sensitive content at egress or purpose at query time | Usually outside the agent loop; do not bind “obtained under capability C” to later tool sinks |
-| **Object-capability OS (Capsicum, EROS)** | Strong confinement theory | Process/OS layer — not a portable JSON gate for LLM tool calls |
-| **Sandboxes (gVisor, Firecracker)** | Isolate processes/VMs | Isolation ≠ typed authority for which *agent action* may run |
-
-**Sluicegate’s practical niche:** a small, auditable **authority check at the agent↔tool boundary** — signed proofs, attenuation, epoch revoke, hash-chained decisions — with a path toward purpose/flow controls layered on capabilities. That is narrower than “replace enterprise IAM,” and stronger than “another LangChain middleware.”
-
-If you only need Rego policies for a REST API, use OPA. If you need relationship tuples at global scale, use OpenFGA. If you need a capability gate in front of agent tools with cryptographic proofs and a tiny verified core, evaluate Sluicegate.
-
----
-
-## What it does *not* do
-
-| Not this | Why |
-|---|---|
-| Model alignment / ethics | Values and intent need semantics; this gate is structural |
-| Natural-language intent parsing | The kernel does not interpret prompts |
-| Side-channel defense | Timing and covert channels are out of scope ([THREAT_MODEL.md](THREAT_MODEL.md)) |
-| Python as the security boundary | `src/authgate/` is a compatibility runtime — **bypassable**; only the Rust TCB carries the security claims |
-| Perfect formal completeness | Partial proofs and bounded model checking — not a full refinement proof from TLA+ to Rust |
-
-Full gap list: [formal/INCOMPLETENESS.md](formal/INCOMPLETENESS.md). Assumptions that must hold for claims to apply: [ASSUMPTIONS.md](ASSUMPTIONS.md).
-
-Optional philosophy / Theory-of-Freedom notes live under [`PHILOSOPHY/`](PHILOSOPHY/) and [FREEDOM_THEORY_POSITION.md](FREEDOM_THEORY_POSITION.md). They are **not** the industrial claim and do not expand the TCB.
-
----
-
-## Numbers
-
-Only the Lean and guard rows were re-verified on 2026-10-12 (command above; CI job `formal.yml`). The other rows are as last recorded and were **not** re-run in that pass.
-
-| Metric | Value |
-|---|---|
-| Security-enforcing Rust path | `engine.rs` + `dag.rs` + `call_gate.rs` — on the order of a few hundred LOC |
-| Rust crate lib tests | 300 passing (`cargo test --release`, independently re-verified 2026-09-16) |
-| Python / integration tests | 1300+ passing |
-| Kani harnesses | 19 proved (bounded) |
-| Lean 4 | **43 hand-written theorems proved, zero `sorry`, no axioms beyond Lean's own** (source count of `theorem` declarations: `Scope` 25, `TCB` 8, `Authgate/Proofs` 6, `Temporal` 2, `MultiAgent` 2). The CI axiom guard checks every theorem constant in these modules, which includes Lean-generated auxiliary lemmas, so its total is not a count of theorems. `Scope.lean`'s antisymmetry theorem (the last holdout, 3 `sorry` earlier the same day) closed 2026-09-16 via a `List Char`-native decomposition lemma (`normalizeL_slash_suffix`) proving the two "crossed prefix ordering" sub-cases are outright impossible, not just hard to compare by length. CI job itself was fixed the same day — it had no default build target and had been checking nothing; see `DECISIONS.md` |
-| TLA+ / TLC | Safety model checked; **CI-verified** via `formal.yml` (`formal/tlc_run.log`) |
-| Python `verify()` latency (indicative) | p50 ≈ 10–17 µs depending on registry size |
-
-Treat formal badges as **evidence of engineering discipline**, not as a certificate that every deployment is secure. Crypto implementations and clock integrity remain caller/environment responsibilities unless separately attested.
-
----
-
-## Architecture (short)
+## How a decision is made
 
 ```text
 Human principal (trust root)
-        │  signs CapabilityProof chains; sets min_epoch to revoke
-        ▼
-CanonicalAction  (actor, resource, rights, proofs, nonce, binding_hash)
-        ▼
-CallGate  — binding → identity → expiry → epoch → resource → attenuation → revocations
-        ▼
-Decision::Permit  |  Decision::Deny { reason }
-        ▼
-AuditLog (SHA-256 hash-chained)
+   signs capability chains, sets min_epoch
+        |
+        v
+CanonicalAction: actor, resource, rights, proofs, nonce, binding_hash
+        |
+        v
+CallGate checks, in order:
+   binding -> identity -> expiry -> epoch -> resource -> attenuation -> revocation
+        |
+        v
+Permit | Deny { reason }   ->   hash-chained audit log
 ```
 
-**Identity binding:** every delegation node must satisfy `subject_id = SHA-256(issuer_pubkey)`. Knowing a parent proof hash without the private key is not enough to forge a child.
+The nine invariants the gate enforces on every call:
 
-**Revocation:** advance `min_epoch` on actions; proofs below that epoch fail. Cohort kill without maintaining a long revocation list.
-
-Nine TCB invariants (binding, identity, expiry, epoch, resource, attenuation, chain epoch/completeness, revocation safety) are listed under [Security invariants](#security-invariants-tcb).
-
----
+| # | Name | Meaning |
+|---|---|---|
+| I1 | CanonicalBinding | `binding_hash` equals the SHA-256 of the other fields |
+| I2 | IdentityBinding | the capability's subject matches the actor |
+| I3 | ExpiryGate | the capability has not expired |
+| I4 | EpochSafety | the leaf epoch is at least `min_epoch` |
+| I5 | ResourceBinding | the capability's resource matches the action's |
+| I6 | Attenuation | child rights are a subset of parent rights at every hop |
+| I7 | ChainEpoch | intermediate nodes also meet the epoch |
+| I8 | ChainComplete | every delegated capability in a Permit has a valid parent in the bundle |
+| I9 | RevocationSafety | only root-signed revocations change a decision |
 
 ## Quick start
 
-### Docker verifier API
+**Docker verifier API** (details in [INFRA.md](INFRA.md)):
 
 ```bash
 cp .env.example .env   # set AUTHGATE_ADMIN_TOKEN
@@ -200,15 +78,10 @@ docker compose up --build -d
 curl -s localhost:8000/readyz
 ```
 
-Details: [INFRA.md](INFRA.md).
-
-### Rust (TCB — prefer for production enforcement)
+**Rust** (this is the part that carries the security claims):
 
 ```rust
-use authgate_kernel::tcb::{
-    call_gate::CallGate,
-    types::{CanonicalAction, Decision, RIGHT_READ},
-};
+use authgate_kernel::tcb::{call_gate::CallGate, types::{CanonicalAction, Decision}};
 
 let gate = CallGate::new(root_verifying_key);
 let mut action = build_canonical_action(/* ... */);
@@ -220,169 +93,136 @@ match gate.execute(&action, unix_now()) {
 }
 ```
 
-### Python (compatibility runtime — not the security boundary)
+**Python** is a compatibility runtime and can be bypassed. Do not use it as the security boundary.
 
 ```python
 from authgate.kernel.entities import AgentType, Entity, Resource, ResourceType, RightsClaim
 from authgate.kernel.registry import OwnershipRegistry
 from authgate.kernel.verifier import Action, FreedomVerifier
-from authgate.kernel.audit import AuditLog
 
 registry = OwnershipRegistry()
-human = Entity("alice", AgentType.HUMAN)
+alice = Entity("alice", AgentType.HUMAN)
 bot = Entity("analyst-bot", AgentType.MACHINE)
 data = Resource("sales-data", ResourceType.DATASET, scope="/data/sales/")
 
-registry.register_machine(bot, human)
+registry.register_machine(bot, alice)
 registry.add_claim(RightsClaim(bot, data, can_read=True))
 
-frozen = registry.freeze()
-audit = AuditLog(path="/var/log/authgate.jsonl")
-verifier = FreedomVerifier(frozen, audit_log=audit)
-
-result = verifier.verify(Action("read-sales", actor=bot, resources_read=[data]))
-print(result.summary())
-assert audit.verify_chain()
+verifier = FreedomVerifier(registry.freeze())
+print(verifier.verify(Action("read-sales", actor=bot, resources_read=[data])).summary())
 ```
 
-### CLI
+**CLI:** `pip install -e . && authgate-cli verify --registry registry.json --action action.json --audit log.jsonl`
+
+**Sandboxing:** `cargo build --features sandbox` adds a WASM executor limited to the permitted rights. On Linux, `SeccompExecutor` applies a matching syscall allowlist.
+
+## What is verified
+
+Three layers, each with a different strength. None of them is a full proof of the Rust code.
+
+| Layer | What it covers | Status |
+|---|---|---|
+| Rust tests | Kernel behaviour | 301 library tests pass (`cargo test`) |
+| Kani | Bounded model checking of Rust properties, such as determinism and attenuation | Harnesses in [`formal/`](formal/) |
+| TLA+ / TLC | Safety of the abstract state machine | Bounded model check, run in CI |
+| Lean 4 | Abstract models of the gate | Two packages, below |
+
+**Lean 4.** The axiom guard (`formal/lean4/run_axiom_guard.sh`) checks every theorem constant. Current result:
+
+| Package | Theorems checked | Declared axioms | Violations |
+|---|---|---|---|
+| `FreedomKernel` | 152 | 0 | 0 |
+| `Authgate` | 19 | 0 | 0 |
+
+The guard counts theorem constants, including Lean-generated helper lemmas, so these are not counts of hand-written theorems. It fails the build on `sorry`, extra axioms, and three kinds of empty proof:
+
+- **VACUOUS-THM:** the conclusion is true for any input.
+- **RESTATED:** the proof just returns its own hypothesis.
+- **TAUTOLOGY:** the statement is `x = x` or similar.
+
+What the Lean models cover:
+
+- `Composition.lean`: a veto-only verdict lattice (`allow < limit < contain < defer < deny`). Combining verdicts can never be more permissive than the most restrictive input.
+- `Chain.lean`: the delegation-chain check from `dag.rs`, over 64-bit rights with a depth limit of 16.
+- `MultiAgent.lean`: attenuation is transitive and never escalates read, write or delegate rights.
+- `Temporal.lean`: information-flow control over a plan. Data read at one step is never written to a lower-labelled resource later. Unknown labels fail closed.
+- `TCB.lean`: the forbidden-flag and human-ownership rules of the verifier core.
+
+Limits you should know about:
+
+- The Lean results are about abstract models. The link from those models to the signed-token Rust code is not formalised.
+- Determinism of `verify` is checked by Kani, not Lean.
+- There is no refinement proof from TLA+ to Rust.
+
+Details and the full gap list: [formal/README.md](formal/README.md), [formal/INCOMPLETENESS.md](formal/INCOMPLETENESS.md).
+
+## What it does not do
+
+| Not this | Why |
+|---|---|
+| Stop an action that bypasses the gate | That needs process isolation, which is a separate and partial layer. |
+| Understand intent or truth | The gate is structural. It does not read prompts. |
+| Align model behaviour | Out of scope. |
+| Defend against side channels | See [THREAT_MODEL.md](THREAT_MODEL.md). |
+| Handle a malicious trust root | The root key is assumed honest. |
+| Make Python a security boundary | Only the Rust core carries the claims. |
+| Provide distributed consensus | Non-goal, see [NON_GOALS.md](NON_GOALS.md). |
+
+The clock is supplied by the caller. Use the monotonic `SessionClock` so backward time jumps are rejected within a session.
+
+Read [ASSUMPTIONS.md](ASSUMPTIONS.md) before relying on any claim here.
+
+## How it compares
+
+Sluicegate is not a replacement for general policy engines.
+
+- Use **OPA** or **Cedar** for service or cloud policy.
+- Use **OpenFGA / Zanzibar** for relationship graphs at scale.
+- Use **a sandbox** (gVisor, Firecracker) to isolate processes.
+
+Use Sluicegate for a narrow job: a cryptographic authority check between an agent and its tools, with delegation, attenuation and cohort revocation built in. Comparison and kill-tests: [COMPARATIVE_EVALUATION.md](COMPARATIVE_EVALUATION.md), [WHY_NOT_OPA.md](WHY_NOT_OPA.md).
+
+## Run the tests
 
 ```bash
-pip install -e .
-authgate-cli verify --registry registry.json --action action.json --audit log.jsonl
-authgate-cli audit verify /var/log/authgate.jsonl
-```
+# Rust kernel
+cd authgate-kernel && cargo test
 
-### WASM sandbox (feature-gated)
-
-```bash
-cargo build --features sandbox
-```
-
-`SandboxedExecutor` wraps `CallGate` so permitted actions run with host imports limited to the rights bitmask. On Linux, pair with `SeccompExecutor` / `SeccompCallGate` for subprocess syscall confinement using the same rights mapping (`authgate-kernel/src/seccomp.rs`).
-
----
-
-## Running tests
-
-```bash
-# Rust TCB
-cd authgate-kernel && cargo test --lib
-
-# Kani (selected harnesses)
-cargo kani --harness prop_attenuation_two_node
-cargo kani --harness prop_epoch_check
-cargo kani --harness proof_forged_revocation_ignored
-
-# Lean 4: two separate packages (different toolchains), then the axiom guard
-(cd formal/lean4 && lake build)                  # Authgate
-(cd formal/lean4/FreedomKernel && lake build)    # FreedomKernel
-formal/lean4/run_axiom_guard.sh all              # must exit 0; see note below
+# Lean: two packages, then the guard (must exit 0)
+(cd formal/lean4 && lake exe cache get && lake build)   # Authgate (uses mathlib)
+(cd formal/lean4/FreedomKernel && lake build)           # FreedomKernel
+formal/lean4/run_axiom_guard.sh all
 
 # Python
-pip install -e ".[dev]"
-pytest
+pip install -e ".[dev]" && pytest
 
 # Attack harness
 python attack_harness/wire_attacks.py
-python attack_harness/differential_tests.py
-python attack_harness/mutation_attacks.py
 ```
 
-**About the Lean guard.** `run_axiom_guard.sh` is the only supported entry point. Running `lake env lean formal/lean4/check_axioms.lean` directly (without `--run`) only elaborates the file, prints nothing and exits 0, which looks like a pass but checks nothing. The guard exits 1 if it finds no theorems in scope and 2 on bad usage.
-
----
-
-## Security invariants (TCB)
-
-Enforced on every `verify()` / `CallGate::execute`, in order:
-
-| # | Name | Claim |
-|---|---|---|
-| I1 | CanonicalBinding | `binding_hash == SHA-256(other fields)` |
-| I2 | IdentityBinding | capability subject matches actor |
-| I3 | ExpiryGate | capability not expired |
-| I4 | EpochSafety | leaf epoch ≥ `min_epoch` |
-| I5 | ResourceBinding | capability resource matches action |
-| I6 | Attenuation | child rights ⊆ parent rights at every hop |
-| I7 | ChainEpoch | intermediate nodes also satisfy epoch |
-| I8 | ChainComplete | every delegated cap in a Permit has a valid parent in the bundle |
-| I9 | RevocationSafety | only root-signed revocations affect decisions |
-
----
+Run the guard only through `run_axiom_guard.sh`. Calling `lake env lean check_axioms.lean` directly prints nothing and exits 0 without checking anything.
 
 ## Repository layout
 
 ```text
-authgate-kernel/     Rust kernel; TCB under src/tcb/; seccomp + session_clock helpers
-formal/              TLA+, Kani, Lean 4, coverage & incompleteness notes
-.github/workflows/   CI, formal.yml, seccomp.yml, sandbox.yml
-attack_harness/      Wire / differential / mutation probes
-src/authgate/        Python compatibility runtime + adapters (not TCB)
-spec/                JSON Schema wire contract
-examples/            Integrations (incl. Kubernetes sidecar)
-docs/figures/        Architecture diagrams
-INDUSTRY_READINESS.md  Maturity tiers T1–T4 (assurance → production)
-KEY_MANAGEMENT.md    Vault / KMS / Key Vault integration guide
-DISASTER_RECOVERY.md Root-key compromise & audit recovery runbooks
-MIGRATION.md         Registry/schema migration guide
+authgate-kernel/    Rust kernel. Trusted core in src/tcb/.
+formal/             TLA+, Kani, Lean 4, coverage and gap notes
+src/authgate/       Python compatibility runtime and adapters (not trusted)
+spec/               JSON Schema wire contract
+attack_harness/     Wire, differential and mutation probes
+examples/           Integrations, including a Kubernetes sidecar
 ```
 
----
+Operations guides: [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md), [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md), [MIGRATION.md](MIGRATION.md), [DEPLOYMENT.md](DEPLOYMENT.md).
 
-## Engineering gaps
-
-All items from the original gap audit are **closed or explicitly scoped**. None remain open.
-
-| Item | Resolution |
-|------|------------|
-| WASM sandbox | **Closed** — Linux CI (`.github/workflows/sandbox.yml`); Windows local dev optional (SDK in [DEPLOYMENT.md](DEPLOYMENT.md)) |
-| OS-level confinement (seccomp-bpf) | **Closed** — Linux CI adversarial test + rights-derived allowlist (`.github/workflows/seccomp.yml`); Windows/macOS: subprocess isolation only |
-| TLC / Java tooling | **Closed** — CI-verified (`.github/workflows/formal.yml`); log in `formal/tlc_run.log` |
-| CLI packaging | **Closed** — `authgate-cli` entry point + fresh-venv CI smoke; PyPI publish is release ops, not a gate gap |
-| Refinement proof TLA+ → Rust | **Out of scope** — limitation L7, not an engineering gap |
-| Distributed consensus in Rust TCB | **Non-goal** — [NON_GOALS.md](NON_GOALS.md) |
-
-**Infra-ready bar:** this table must stay empty of open rows; see [INFRA.md](INFRA.md).
-
-The intended long-term enforcement chain:
-
-```text
-Agent → CallGate → capability-bound WASM (or OS sandbox) → restricted IO
-```
-
----
-
-## Explicit limitations
-
-| # | Limitation |
-|---|---|
-| L1 | Semantic content / natural-language intent is not gated |
-| L2 | A malicious trust root is out of scope |
-| L3 | Side channels not addressed |
-| L4 | Python runtime is not formally verified |
-| L5 | Heuristic extensions (IFC helpers, scorers) are not TCB |
-| L6 | Clock is caller-supplied — use `SessionClock` / monotonic sourcing; backward jumps rejected within a session (see `TCB_DISCIPLINE.md`) |
-| L7 | No implementation-level refinement proof from TLA+ to Rust |
-
----
+Background and positioning: [POSITIONING.md](POSITIONING.md), [`PHILOSOPHY/`](PHILOSOPHY/). The constitution this repo implements the authority half of is in [Aliipou/freedom-theory](https://github.com/Aliipou/freedom-theory).
 
 ## Contributing
 
-Before changing anything under the TCB (`authgate-kernel/src/tcb/`):
-
-> Can this feature live entirely *outside* the TCB?
-
-If yes, keep it out. TCB changes need an invariant justification, proof or model-check evidence where applicable, and regression coverage. See [CONTRIBUTING.md](CONTRIBUTING.md) and [BRANCHES.md](BRANCHES.md).
-
----
+Before changing anything under `authgate-kernel/src/tcb/`, ask: can this live outside the trusted core? If yes, keep it out. Changes to the core need an invariant justification, proof or model-check evidence where it applies, and regression tests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-[Apache License 2.0](LICENSE), including its express patent grant — see also [NOTICE](NOTICE).
+[Apache-2.0](LICENSE), with [NOTICE](NOTICE). Versions published before 2026-10-10 (as *authgate-kernel*) were released under PolyForm Noncommercial 1.0.0 and stay under it. Contributions are accepted under the [Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin-dco).
 
-Versions published before 2026-10-10 (under the former name *authgate-kernel*) were released under the PolyForm Noncommercial License 1.0.0 and remain under that license. Contributions are accepted under the [Developer Certificate of Origin](CONTRIBUTING.md#developer-certificate-of-origin-dco).
-
-## Name
-
-Sluicegate was called *AuthGate* / *authgate-kernel* until 2026-10-10. Python package, crate and module identifiers (`authgate`, `authgate-kernel`) and wire-format tags are **unchanged for now** to avoid breaking signed artifacts; they will be renamed in a separate, versioned release.
+**Name.** Sluicegate was *AuthGate* / *authgate-kernel* until 2026-10-10. The `authgate` package, the `authgate-kernel` crate and wire-format tags keep the old name for now so signed artifacts do not break. They will be renamed in a separate versioned release.
