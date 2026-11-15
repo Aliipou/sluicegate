@@ -22,7 +22,7 @@ authgate() {
 
 freedomkernel() {
   (cd "$root/FreedomKernel" && lake env lean --run ../check_axioms.lean "" \
-    FreedomKernel Scope TCB Temporal MultiAgent Incompleteness)
+    FreedomKernel Scope TCB Temporal MultiAgent Incompleteness Composition Chain)
 }
 
 case "${1:-}" in

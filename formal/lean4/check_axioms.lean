@@ -10,6 +10,10 @@
               (Would have caught the inconsistent `infinite_horizon_undecidable`.)
     VACUOUS   an axiom whose conclusion is True states nothing.
               (Would have caught `sig_euf_cma : ... -> True`.)
+    VACUOUS-THM / RESTATED / TAUTOLOGY
+              a theorem whose conclusion is True, whose proof is one of its own
+              hypotheses, or whose conclusion is `a = a`, states nothing about the
+              system and must not be counted as a result.
 
   DO NOT run `lake env lean check_axioms.lean` directly: without `--run` Lean
   only elaborates this file, prints nothing and exits 0 -- a silent "pass"
@@ -34,6 +38,18 @@ def baseline : List Name := [`propext, `Classical.choice, `Quot.sound]
 def conclusionIsTrue (type : Expr) : MetaM Bool :=
   Meta.forallTelescopeReducing type fun _ concl => do
     return (← Meta.whnf concl).isConstOf ``True
+
+/-- A theorem whose proof is literally one of its own hypotheses restates that
+hypothesis and proves nothing about the system (`theorem t (h : P) : P := h`). -/
+def restatesHypothesis (value : Expr) : MetaM Bool :=
+  Meta.lambdaTelescope value fun xs body => return body.isFVar && xs.contains body
+
+/-- `a = a` holds for every `a`; such a theorem states nothing. -/
+def isReflTautology (type : Expr) : MetaM Bool :=
+  Meta.forallTelescopeReducing type fun _ concl => do
+    match concl.eq? with
+    | some (_, a, b) => return a == b
+    | none => return false
 
 def main (args : List String) : IO UInt32 := do
   match args with
@@ -63,8 +79,21 @@ def main (args : List String) : IO UInt32 := do
         if vac then
           bad := bad + 1
           IO.println s!"FAIL VACUOUS {n}: conclusion is True, states nothing"
-      | .thmInfo _ =>
+      | .thmInfo ti =>
+        if n.isInternal then continue
         theorems := theorems + 1
+        let (vacT, _) ← ((conclusionIsTrue ti.type).run' : CoreM Bool).toIO ctx { env }
+        if vacT then
+          bad := bad + 1
+          IO.println s!"FAIL VACUOUS-THM {n}: conclusion is True, states nothing"
+        let (rest, _) ← ((restatesHypothesis ti.value).run' : CoreM Bool).toIO ctx { env }
+        if rest then
+          bad := bad + 1
+          IO.println s!"FAIL RESTATED {n}: proof is one of its own hypotheses"
+        let (taut, _) ← ((isReflTautology ti.type).run' : CoreM Bool).toIO ctx { env }
+        if taut then
+          bad := bad + 1
+          IO.println s!"FAIL TAUTOLOGY {n}: conclusion is a = a"
         let (axs, _) ← (Lean.collectAxioms n : CoreM (Array Name)).toIO ctx { env }
         let unexpected := axs.toList.filter (!allowed.contains ·)
         unless unexpected.length == 0 do

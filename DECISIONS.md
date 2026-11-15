@@ -334,3 +334,13 @@ Python implementation (`authgate.kernel.entities.scope_contains`) ever
 changes shape, re-check these theorems still mirror it — they were proved
 against the current spec comment at the top of `Scope.lean`, not generated
 from the Python source.
+
+## Remove vacuous Lean theorems; add veto-composition and chain models
+
+**Decision:** Six theorems that held for any input (`verify_deterministic` by `rfl`, `ownerless_machine_must_have_owner` by `trivial`, `attenuation_cannot_escalate`, `delegation_depth_bounded`, the old `no_downward_write`, and a restated hypothesis) were removed. They are replaced by `Composition.lean` (veto lattice), `Chain.lean` (dag.rs `validate_chain`), `TCB.verifyCore`, and `Temporal.advance_no_downward_write`. `check_axioms.lean` now fails the build on VACUOUS-THM, RESTATED and TAUTOLOGY. Determinism is covered by Kani `prop_permitted_deterministic`.
+
+**Why:** A proof that cannot fail adds no assurance and made the "151 verified theorems" claim misleading.
+
+**Trade-offs accepted:** Fewer headline theorems. Unknown labels still fail open in `planner.rs` (recorded as `unknown_label_fails_open`); fixing that is a separate PR.
+
+**Revisit when:** The planner fails closed on unknown labels, or the `authgate` package guard run is complete.

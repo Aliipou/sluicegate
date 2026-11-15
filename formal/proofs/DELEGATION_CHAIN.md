@@ -14,7 +14,7 @@ delegation chains, and that no chain can produce a claim wider than the root gra
 
 ## Existing Proofs (from Lean 4)
 
-`attenuation_cannot_escalate` (proved, no sorry):
+`MultiAgent.attenuated_trans` and `Chain.walk_rights` (proved, no sorry):
 > Delegated confidence ≤ delegator confidence.
 
 This covers confidence. We need analogous proofs for capability kinds.
@@ -45,6 +45,6 @@ formalized — currently tested, not proved.
 
 ## Next Steps
 
-1. Formalize C1 in Lean 4 (extends existing `attenuation_cannot_escalate`)
+1. Formalize C1 in Lean 4 (extends existing `MultiAgent.attenuated_trans`)
 2. Use hypothesis (property testing) to detect counterexamples before proving C3
 3. Extract DAG invariant from authority_graph.rs for formal treatment

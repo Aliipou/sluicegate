@@ -514,7 +514,7 @@ mod tcb_tests {
 
     #[test]
     fn chain_depth_limit_enforced() {
-        // Build a chain of MAX_CHAIN_DEPTH + 1 nodes — depth limit should fire.
+        // Build 17 hops (> MAX_CHAIN_DEPTH = 16): root-issued proof plus 17 delegations; — depth limit should fire.
         // Each node's subject_id = SHA-256(next_signer.pubkey) to satisfy AT-5.1.
         let root_sk = random_key();
         let root_vk = root_sk.verifying_key();
@@ -536,6 +536,27 @@ mod tcb_tests {
         let result = validate_chain(all_proofs.last().unwrap(), &all_proofs, &root_vk, EPOCH);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("depth limit"));
+    }
+
+    #[test]
+    fn chain_depth_exactly_max_passes() {
+        // Boundary: exactly MAX_CHAIN_DEPTH (16) hops must be accepted.
+        let root_sk = random_key();
+        let root_vk = root_sk.verifying_key();
+        let first_sk = random_key();
+        let mut all_proofs = Vec::new();
+        let mut prev = make_root_proof(&root_sk, subject_id_of(&first_sk), RESOURCE, RIGHT_READ, EXPIRY, EPOCH);
+        all_proofs.push(prev.clone());
+        let mut current_sk = first_sk;
+        for _ in 0..15u8 {
+            let next_sk = random_key();
+            let next = make_delegated_proof(&current_sk, &prev, subject_id_of(&next_sk), RESOURCE, RIGHT_READ, EXPIRY, EPOCH);
+            all_proofs.push(next.clone());
+            prev = next;
+            current_sk = next_sk;
+        }
+        let result = validate_chain(all_proofs.last().unwrap(), &all_proofs, &root_vk, EPOCH);
+        assert!(result.is_ok(), "16-hop chain must pass: {:?}", result);
     }
 
     // ── Attack tree coverage ─────────────────────────────────────────────────

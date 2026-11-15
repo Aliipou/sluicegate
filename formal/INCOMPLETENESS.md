@@ -11,7 +11,7 @@ seL4 documented the same boundary. A system that claims to prove everything prov
 They do NOT apply to the Python layer in `src/authgate/kernel/`.
 
 Specifically:
-- `verify_deterministic` (Lean4): proved for the Rust `verify()` function which is a pure
+- `prop_permitted_deterministic` (Kani): checked for the Rust `verify()` function which is a pure
   function with no side effects. The Python `FreedomVerifier.verify()` writes to its
   internal `_audit_log` and `_tracer` during execution — it has side effects.
   The theorem does not apply to it (C-4 in FINDINGS.md).
@@ -89,11 +89,11 @@ with declared terminal goals. This is heuristic, not formal.
 | A7: write denied without claim | Kani: `prop_write_denied_without_claim` | Unconditional |
 | A7: read denied without claim | Kani: `prop_read_denied_without_claim` | Unconditional |
 | A7: delegation denied without can_delegate | Kani: `prop_delegation_denied_without_delegate_claim` | Unconditional |
-| Determinism | Kani: `prop_permitted_deterministic` + Lean 4 `verify_deterministic` (rfl) | Unconditional |
+| Determinism | Kani: `prop_permitted_deterministic` | Unconditional |
 | Permitted → no violations | Kani: `prop_permitted_implies_no_violations` | Unconditional |
 | Blocked → violations non-empty | Kani: `prop_blocked_implies_violations_non_empty` | Unconditional |
 | Taint monotonicity | Lean 4: `taint_monotone` | Unconditional |
-| Attenuation cannot escalate | Lean 4: `attenuation_cannot_escalate` | Structural |
+| Attenuation cannot escalate | Lean 4: `MultiAgent.attenuated_trans`, `no_write_escalation`, `withDepth_le`, `Chain.walk_rights`, `Chain.walk_hops` | Structural |
 | Plan prefix safety (depth n) | Kani: `prop_plan_permitted_means_no_forbidden_flags` | Bounded by KANI_UNWIND |
 | No panics in TCB | `#![deny(clippy::unwrap_used)]` + Miri | TCB files only |
 
@@ -135,14 +135,14 @@ formal/lean4/FreedomKernel/
     [✓] sovereignty_flag_blocks              (proved by simp)
     [✓] coercion_flag_blocks                 (proved by simp)
     [✓] deception_flag_blocks                (proved by simp)
-    [✓] verify_deterministic                 (proved by rfl)
+    [✓] prop_permitted_deterministic          (Kani)
     [✓] permitted_implies_no_forbidden_flag  (proved by simp)
   Temporal.lean
     [✓] taint_monotone                       (proved)
-    [ ] no_downward_write                    (structural, Kani-verified)
+    [✓] Temporal.advance_no_downward_write  (proved)
   MultiAgent.lean
-    [✓] attenuation_cannot_escalate          (proved)
-    [✓] delegation_depth_bounded             (trivial)
+    [✓] MultiAgent.attenuated_trans        (proved)
+    [✓] withDepth_le, Chain.walk_hops      (proved)
   Scope.lean (rewritten 2026-09-16 over `List Char`, see DECISIONS.md)
     [✓] scope_contains_reflexive (T-SC1)     (proved, zero sorry)
     [✓] scope_contains_root_universal (T-SC2) (proved, zero sorry)
