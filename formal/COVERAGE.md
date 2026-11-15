@@ -64,7 +64,6 @@ Located in `formal/lean4/` (see `Proofs.lean`):
 | `forbidden_implies_blocked`      | Any action with a forbidden flag cannot be permitted                       |
 | `prop_permitted_deterministic` (Kani) | Same input → same output; no hidden state                                  |
 | `attenuation_transitive`         | If B ⊆ A and C ⊆ B then C ⊆ A (chain attenuation)                        |
-| `rights_sufficiency_correct`     | required ⊆ cap.rights ↔ rights check passes                               |
 | `epoch_gate_total`               | cap.epoch < min ∨ min ≤ cap.epoch — no third case                         |
 | `stale_epoch_implies_deny`       | cap.epoch < min_epoch → ¬FreshEpoch                                       |
 | `subject_mismatch_violates_binding` | cap.subject ≠ actor_id → ¬SubjectBinding                               |

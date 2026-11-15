@@ -137,7 +137,6 @@ Plus the strict variant: machine→human dominion is structurally impossible.
 | Code (Rust)   | `freedom-kernel/src/tcb/dag.rs:101` (`(rights & !parent.rights) != 0` → reject) |
 | Code (Python) | `src/authgate/kernel/registry.py:_delegation_chain_valid()` + `verify()` machine-dominion check |
 | Lean theorem  | `MultiAgent.attenuated_trans` / `no_write_escalation` and `Chain.walk_rights` (proved) |
-| Lean theorem  | `rights_sufficiency_correct` (proved by simp) |
 | Kani harness  | `prop_attenuation_two_node` (✓ proved) |
 | Kani harness  | `prop_machine_governs_human_blocked` (✓ proved) |
 | Closes attacks| AT-2.4 (child > parent), AT-5.* (impersonation) |
