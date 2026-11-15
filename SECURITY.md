@@ -26,7 +26,8 @@ either a Kani bounded model-checking harness or a Lean 4 proof with no
 | PERMITTED ↔ violations list is empty (and vice versa for BLOCKED) | Kani: `prop_permitted_implies_no_violations`, `prop_blocked_implies_violations_non_empty` |
 | Verification is deterministic: same input always produces same output | Kani: `prop_permitted_deterministic` |
 | Delegated authority cannot exceed delegator authority (attenuation) | Lean 4: `MultiAgent.attenuated_trans`, `no_write_escalation`, `withDepth_le`, `Chain.walk_rights`, `Chain.walk_hops` |
-| IFC taint is monotone across a plan | Lean 4: `taint_monotone` |
+| IFC taint is monotone across a plan; data read is never written to a lower-labelled resource; unknown labels fail closed | Lean 4: `taint_monotone`, `Temporal.plan_no_downflow`, `unknown_label_fails_closed` |
+| A spawned child never receives more claims than its parent holds | Rust test: `verify_spawn` rejects with `ClaimNotHeld` (not a Lean theorem) |
 | ed25519 signing key is generated once per process; results carry timestamp + nonce | `crypto.rs` |
 
 **Scope of these proofs:** `engine.rs` behaviors on typed inputs only.

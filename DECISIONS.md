@@ -341,6 +341,16 @@ from the Python source.
 
 **Why:** A proof that cannot fail adds no assurance and made the "151 verified theorems" claim misleading.
 
-**Trade-offs accepted:** Fewer headline theorems. Unknown labels still fail open in `planner.rs` (recorded as `unknown_label_fails_open`); fixing that is a separate PR.
+**Trade-offs accepted:** Fewer headline theorems. Unknown labels failed open in `planner.rs` at the time (recorded as `unknown_label_fails_open`); closed by the entry below.
 
 **Revisit when:** The planner fails closed on unknown labels, or the `authgate` package guard run is complete.
+
+## Planner fails closed on unknown IFC labels; spawn checks delegated claims
+
+**Decision:** `planner.rs` ranks an unrecognised non-empty label as SECRET when it taints (read side) and as PUBLIC when it is a write target (`sink_rank`). Ranking unknown sinks SECRET would have let SECRET data flow into an unknown sink. `Temporal.lean` mirrors both (`labelRankS`, `sinkRankS`; `unknown_label_fails_closed`, `unknown_sink_fails_closed`). Separately, `verify_spawn` now rejects any `delegated_claims` entry the parent does not hold with `can_delegate` and at least the same read/write/delegate rights (`SpawnError::ClaimNotHeld`); before, the field was accepted and ignored.
+
+**Why:** A silently ignored field and a default-permissive label rank are the same failure: the caller believes a check happened.
+
+**Trade-offs accepted:** Previously accepted plans that used unknown labels are now rejected. Claim expiry is not checked in `verify_spawn` (no clock there). Deleting the field was the alternative.
+
+**Revisit when:** Labels become a closed enum on the wire, or spawn gets a clock for expiry.
