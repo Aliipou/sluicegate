@@ -11,7 +11,7 @@
 // chains of arbitrary length (loop invariant, no unrolling).
 //
 // Trusted modelling assumptions (NOT verified here):
-//  A1. Signature, epoch, resource and SHA-256 identity checks of dag.rs are
+//  A1. Signature and SHA-256 issuer-identity checks of dag.rs are (epoch + resource ARE modelled)
 //      omitted. They only add early `Err` returns, so the model accepts a
 //      superset of what dag.rs accepts; a property of the model's Ok implies
 //      the property for dag.rs's Ok.
@@ -29,6 +29,10 @@ pub struct Node {
     /// None = IssuerRef::Root, Some(h) = IssuerRef::Delegated { parent_hash: h }
     pub parent: Option<u64>,
     pub rights: u64,
+    /// dag.rs: ProofNode.epoch, checked on every hop (AT-3.1)
+    pub epoch: u64,
+    /// dag.rs: ProofNode.resource_hash (32 bytes there, u64 here; equality only)
+    pub resource: u64,
 }
 
 /// a ⊆ b  <=>  (a & !b) == 0   (the exact test used in dag.rs line 100)
@@ -84,7 +88,7 @@ fn find(bundle: &Vec<Node>, h: u64) -> (r: Option<usize>)
 }
 
 /// Copy of the dag.rs walk loop (rights/attenuation + parent lookup + depth limit only).
-pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64, ()>)
+pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize, min_epoch: u64) -> (r: Result<u64, ()>)
     requires leaf < bundle.len(), max_depth < 0xffff_ffffusize,
     ensures
         match r {
@@ -94,7 +98,11 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
                 // unbounded conclusion: leaf rights ⊆ rights of EVERY node on the path
                 && (forall|k: int| 0 <= k < path.len() ==>
                         subset(bundle@[leaf as int].rights, #[trigger] bundle@[path[k]].rights))
-                && subset(bundle@[leaf as int].rights, root_rights),
+                && subset(bundle@[leaf as int].rights, root_rights)
+                // every node on the path (including the root) has epoch >= min_epoch
+                && (forall|k: int| 0 <= k < path.len() ==> #[trigger] bundle@[path[k]].epoch >= min_epoch)
+                // resource propagation: every node on the path is for the leaf's resource
+                && (forall|k: int| 0 <= k < path.len() ==> #[trigger] bundle@[path[k]].resource == bundle@[leaf as int].resource),
             Err(_) => true,
         },
 {
@@ -118,6 +126,8 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
             forall|k: int| 0 <= k < path.len() ==>
                 subset(leaf_rights, #[trigger] bundle@[path[k]].rights),
             leaf_rights == bundle@[leaf as int].rights,
+            forall|k: int| 0 <= k < path.len() - 1 ==> #[trigger] bundle@[path[k]].epoch >= min_epoch,
+            forall|k: int| 0 <= k < path.len() ==> #[trigger] bundle@[path[k]].resource == bundle@[leaf as int].resource,
             depth <= max_depth + 1,
             max_depth < 0xffff_ffffusize,
         decreases max_depth + 1 - depth,
@@ -126,6 +136,11 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
             return Err(());
         }
         depth += 1;
+
+        // dag.rs: `if current.epoch < min_epoch { return Err(..) }` on every hop
+        if bundle[cur].epoch < min_epoch {
+            return Err(());
+        }
 
         match bundle[cur].parent {
             None => {
@@ -141,6 +156,10 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
                     Some(i) => i,
                     None => { return Err(()); }
                 };
+                // Resource propagation: dag.rs line 82
+                if bundle[cur].resource != bundle[p].resource {
+                    return Err(());
+                }
                 // Attenuation: dag.rs line 100
                 if (bundle[cur].rights & !bundle[p].rights) != 0 {
                     return Err(());
@@ -150,6 +169,10 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
                     subset_trans(leaf_rights, bundle@[cur as int].rights, bundle@[p as int].rights);
                     path = old.push(p as int);
                     assert(path.len() == old.len() + 1);
+                    assert forall|k: int| 0 <= k < path.len() implies
+                        #[trigger] bundle@[path[k]].resource == bundle@[leaf as int].resource by {
+                        if k < old.len() { assert(path[k] == old[k]); }
+                    }
                     assert forall|k: int| 0 <= k < path.len() implies
                         subset(leaf_rights, #[trigger] bundle@[path[k]].rights) by {
                         if k < old.len() { assert(path[k] == old[k]); }
