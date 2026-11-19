@@ -43,6 +43,12 @@ proof fn subset_trans(a: u64, b: u64, c: u64)
     assert(a & !b == 0 && b & !c == 0 ==> a & !c == 0) by (bit_vector);
 }
 
+proof fn subset_refl(a: u64)
+    ensures subset(a, a),
+{
+    assert(a & !a == 0) by (bit_vector);
+}
+
 /// `path` is a genuine delegation path in `bundle` ending at a root node.
 pub open spec fn valid_path(bundle: Seq<Node>, leaf: int, path: Seq<int>) -> bool {
     &&& path.len() >= 1
@@ -79,7 +85,7 @@ fn find(bundle: &Vec<Node>, h: u64) -> (r: Option<usize>)
 
 /// Copy of the dag.rs walk loop (rights/attenuation + parent lookup + depth limit only).
 pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64, ()>)
-    requires leaf < bundle.len(),
+    requires leaf < bundle.len(), max_depth < 0xffff_ffffusize,
     ensures
         match r {
             Ok(root_rights) => exists|path: Seq<int>|
@@ -96,6 +102,7 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
     let mut cur = leaf;
     let mut depth = 0usize;
     let ghost mut path: Seq<int> = seq![leaf as int];
+    proof { subset_refl(leaf_rights); }
 
     loop
         invariant
@@ -111,6 +118,9 @@ pub fn walk(bundle: &Vec<Node>, leaf: usize, max_depth: usize) -> (r: Result<u64
             forall|k: int| 0 <= k < path.len() ==>
                 subset(leaf_rights, #[trigger] bundle@[path[k]].rights),
             leaf_rights == bundle@[leaf as int].rights,
+            depth <= max_depth + 1,
+            max_depth < 0xffff_ffffusize,
+        decreases max_depth + 1 - depth,
     {
         if depth > max_depth {
             return Err(());
