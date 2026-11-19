@@ -276,6 +276,6 @@ MCSpec == Init /\ [][MCNext]_vars
 \* ── State constraint: bound the audit log to prevent infinite growth ──────────
 \* Len<=3 explores multi-million states on this machine; Len<=1 is the
 \* completion gate for CI / first green run. Raise after overnight budget.
-MCConstraint == Len(audit_log) <= 1
+MCConstraint == Len(audit_log) <= 3
 
 =============================================================================
