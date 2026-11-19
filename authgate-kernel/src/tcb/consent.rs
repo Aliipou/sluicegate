@@ -26,7 +26,7 @@
 //! An adapter that never sets `requires_consent` simply does not buy this
 //! protection — same as an adapter that under-states `required_rights`.
 
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 use crate::tcb::types::{Bytes16, Bytes32, Bytes64, Rights};
@@ -151,7 +151,7 @@ pub(crate) fn verify_consent(
     let vk = VerifyingKey::from_bytes(&c.grantor_pubkey)
         .map_err(|_| "consent signature invalid")?;
     let sig = Signature::from_bytes(&c.signature);
-    vk.verify(&c.signing_message(), &sig)
+    vk.verify_strict(&c.signing_message(), &sig)
         .map_err(|_| "consent signature invalid")?;
     Ok(())
 }
@@ -475,5 +475,65 @@ mod tests {
             verify(&action, &root_sk.verifying_key(), NOW),
             Decision::Deny { reason: "canonical binding hash mismatch" }
         ));
+    }
+
+    /// Ed25519 group order L (little-endian).
+    const L_LE: [u8; 32] = [
+        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+    ];
+
+    /// Identity point encoding: a small-order (order 1) public key.
+    fn small_order_key_bytes() -> [u8; 32] {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    }
+
+    /// Signature (R = identity, S = 0). Under cofactorless `verify` this
+    /// validates for ANY message under the identity key; `verify_strict` rejects.
+    fn small_order_sig() -> [u8; 64] {
+        let mut s = [0u8; 64];
+        s[0] = 1;
+        s
+    }
+
+    /// Return `sig` with S replaced by S + L (same scalar mod L, non-canonical).
+    fn malleate_s(sig: &[u8; 64]) -> [u8; 64] {
+        let mut out = *sig;
+        let mut carry = 0u16;
+        for i in 0..32 {
+            let v = sig[32 + i] as u16 + L_LE[i] as u16 + carry;
+            out[32 + i] = (v & 0xff) as u8;
+            carry = v >> 8;
+        }
+        out
+    }
+
+    #[test]
+    fn consent_small_order_grantor_key_rejected() {
+        let pk = small_order_key_bytes();
+        let grantor_sk = SigningKey::generate(&mut OsRng);
+        let mut c = build_consent(&grantor_sk, ACTOR, RESOURCE, RIGHT_READ, 0, true);
+        c.grantor_pubkey = pk;
+        c.grantor = Sha256::digest(pk).into();
+        c.consent_id = c.compute_consent_id();
+        c.signature = small_order_sig();
+        assert_eq!(
+            verify_consent(&c, ACTOR, RESOURCE, RIGHT_READ, NOW),
+            Err("consent signature invalid")
+        );
+    }
+
+    #[test]
+    fn consent_non_canonical_s_rejected() {
+        let grantor_sk = SigningKey::generate(&mut OsRng);
+        let mut c = build_consent(&grantor_sk, ACTOR, RESOURCE, RIGHT_READ, 0, true);
+        assert!(verify_consent(&c, ACTOR, RESOURCE, RIGHT_READ, NOW).is_ok());
+        c.signature = malleate_s(&c.signature);
+        assert_eq!(
+            verify_consent(&c, ACTOR, RESOURCE, RIGHT_READ, NOW),
+            Err("consent signature invalid")
+        );
     }
 }
