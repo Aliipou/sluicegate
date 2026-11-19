@@ -16,7 +16,7 @@
 //! AT-5.1 relies on. All capability issuers must have their pubkey enrolled
 //! as SHA-256(pubkey) = subject_id in the granting proof.
 
-use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, VerifyingKey};
 use sha2::{Digest, Sha256};
 use crate::tcb::types::{CapabilityProof, IssuerRef};
 
@@ -59,7 +59,7 @@ pub fn validate_chain(
         match &current.issuer {
             IssuerRef::Root => {
                 root_key
-                    .verify(&msg, &sig)
+                    .verify_strict(&msg, &sig)
                     .map_err(|_| "root signature verification failed")?;
                 return Ok(());
             }
@@ -68,7 +68,7 @@ pub fn validate_chain(
                 let issuer_key = VerifyingKey::from_bytes(&current.issuer_pubkey)
                     .map_err(|_| "malformed issuer pubkey in proof")?;
                 issuer_key
-                    .verify(&msg, &sig)
+                    .verify_strict(&msg, &sig)
                     .map_err(|_| "intermediate signature verification failed")?;
 
                 let parent = all_proofs
@@ -267,5 +267,89 @@ mod tests {
         let child = make_delegated_proof(&delegator_sk, &parent, actor, RESOURCE, RIGHT_READ, u64::MAX, 1);
         let result = validate_chain(&child, &[parent.clone(), child.clone()], &root_vk, MIN_EPOCH);
         assert!(result.is_ok());
+    }
+
+    /// Ed25519 group order L (little-endian).
+    const L_LE: [u8; 32] = [
+        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+    ];
+
+    /// Identity point encoding: a small-order (order 1) public key.
+    fn small_order_key_bytes() -> [u8; 32] {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    }
+
+    /// Signature (R = identity, S = 0). Under cofactorless `verify` this
+    /// validates for ANY message under the identity key; `verify_strict` rejects.
+    fn small_order_sig() -> [u8; 64] {
+        let mut s = [0u8; 64];
+        s[0] = 1;
+        s
+    }
+
+    /// Return `sig` with S replaced by S + L (same scalar mod L, non-canonical).
+    fn malleate_s(sig: &[u8; 64]) -> [u8; 64] {
+        let mut out = *sig;
+        let mut carry = 0u16;
+        for i in 0..32 {
+            let v = sig[32 + i] as u16 + L_LE[i] as u16 + carry;
+            out[32 + i] = (v & 0xff) as u8;
+            carry = v >> 8;
+        }
+        out
+    }
+
+    #[test]
+    fn root_small_order_key_rejected() {
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut p = make_root_proof(&sk, [1u8; 32], [2u8; 32], RIGHT_READ, u64::MAX, 1);
+        p.signature = small_order_sig();
+        let vk = VerifyingKey::from_bytes(&small_order_key_bytes()).unwrap();
+        assert_eq!(validate_chain(&p, &[p.clone()], &vk, 0), Err("root signature verification failed"));
+    }
+
+    #[test]
+    fn root_non_canonical_s_rejected() {
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut p = make_root_proof(&sk, [1u8; 32], [2u8; 32], RIGHT_READ, u64::MAX, 1);
+        assert!(validate_chain(&p, &[p.clone()], &sk.verifying_key(), 0).is_ok());
+        p.signature = malleate_s(&p.signature);
+        assert_eq!(validate_chain(&p, &[p.clone()], &sk.verifying_key(), 0), Err("root signature verification failed"));
+    }
+
+    fn delegated_leaf(sk: &SigningKey) -> CapabilityProof {
+        CapabilityProof {
+            proof_hash: [7u8; 32],
+            subject_id: [3u8; 32],
+            resource_hash: [2u8; 32],
+            rights: RIGHT_READ,
+            expiry: u64::MAX,
+            epoch: 1,
+            issuer: IssuerRef::Delegated { parent_hash: [8u8; 32] },
+            signature: [0u8; 64],
+            issuer_pubkey: sk.verifying_key().to_bytes(),
+        }
+    }
+
+    #[test]
+    fn delegated_small_order_issuer_key_rejected() {
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut leaf = delegated_leaf(&sk);
+        leaf.issuer_pubkey = small_order_key_bytes();
+        leaf.signature = small_order_sig();
+        assert_eq!(validate_chain(&leaf, &[], &sk.verifying_key(), 0), Err("intermediate signature verification failed"));
+    }
+
+    #[test]
+    fn delegated_non_canonical_s_rejected() {
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut leaf = delegated_leaf(&sk);
+        leaf.signature = sk.sign(&leaf.signing_message()).to_bytes();
+        assert_eq!(validate_chain(&leaf, &[], &sk.verifying_key(), 0), Err("parent proof not found in bundle"));
+        leaf.signature = malleate_s(&leaf.signature);
+        assert_eq!(validate_chain(&leaf, &[], &sk.verifying_key(), 0), Err("intermediate signature verification failed"));
     }
 }

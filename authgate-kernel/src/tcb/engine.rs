@@ -14,7 +14,7 @@
 //!   - Actor-filtered Layer 2: only caps with subject_id == actor_id are validated as grants.
 //!     Intermediate delegation nodes (subject_id == delegator) serve chain traversal only.
 
-use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, VerifyingKey};
 use crate::tcb::consent::verify_consent;
 use crate::tcb::types::{CanonicalAction, Decision, RevocationProof};
 use crate::tcb::dag::validate_chain;
@@ -131,7 +131,7 @@ pub(crate) fn verify(
 
 fn verify_revocation_sig(rev: &RevocationProof, root_key: &VerifyingKey) -> bool {
     let sig = Signature::from_bytes(&rev.signature);
-    root_key.verify(&rev.signing_message(), &sig).is_ok()
+    root_key.verify_strict(&rev.signing_message(), &sig).is_ok()
 }
 
 #[cfg(test)]
@@ -372,5 +372,66 @@ mod tests {
         // Both still permit (independent valid actions, not replays of same nonce).
         assert_eq!(verify(&a1, &root_vk, 1000), Decision::Permit);
         assert_eq!(verify(&a2, &root_vk, 1000), Decision::Permit);
+    }
+
+    /// Ed25519 group order L (little-endian).
+    const L_LE: [u8; 32] = [
+        0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x10,
+    ];
+
+    /// Identity point encoding: a small-order (order 1) public key.
+    fn small_order_key_bytes() -> [u8; 32] {
+        let mut b = [0u8; 32];
+        b[0] = 1;
+        b
+    }
+
+    /// Signature (R = identity, S = 0). Under cofactorless `verify` this
+    /// validates for ANY message under the identity key; `verify_strict` rejects.
+    fn small_order_sig() -> [u8; 64] {
+        let mut s = [0u8; 64];
+        s[0] = 1;
+        s
+    }
+
+    /// Return `sig` with S replaced by S + L (same scalar mod L, non-canonical).
+    fn malleate_s(sig: &[u8; 64]) -> [u8; 64] {
+        let mut out = *sig;
+        let mut carry = 0u16;
+        for i in 0..32 {
+            let v = sig[32 + i] as u16 + L_LE[i] as u16 + carry;
+            out[32 + i] = (v & 0xff) as u8;
+            carry = v >> 8;
+        }
+        out
+    }
+
+    fn rev_for(sk: &SigningKey) -> RevocationProof {
+        let mut rev = RevocationProof { target_proof_hash: [9u8; 32], revoked_at: 1, signature: [0u8; 64] };
+        rev.signature = sk.sign(&rev.signing_message()).to_bytes();
+        rev
+    }
+
+    #[test]
+    fn revocation_sig_valid_accepted() {
+        let sk = SigningKey::generate(&mut OsRng);
+        assert!(verify_revocation_sig(&rev_for(&sk), &sk.verifying_key()));
+    }
+
+    #[test]
+    fn revocation_small_order_key_rejected() {
+        let vk = VerifyingKey::from_bytes(&small_order_key_bytes()).unwrap();
+        let mut rev = rev_for(&SigningKey::generate(&mut OsRng));
+        rev.signature = small_order_sig();
+        assert!(!verify_revocation_sig(&rev, &vk));
+    }
+
+    #[test]
+    fn revocation_non_canonical_s_rejected() {
+        let sk = SigningKey::generate(&mut OsRng);
+        let mut rev = rev_for(&sk);
+        rev.signature = malleate_s(&rev.signature);
+        assert!(!verify_revocation_sig(&rev, &sk.verifying_key()));
     }
 }
