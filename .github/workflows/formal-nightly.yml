@@ -1,0 +1,43 @@
+name: Formal verification (nightly, bound 3)
+
+# Nightly TLC run at MCConstraint == Len(audit_log) <= 3 (larger than PR-time CI).
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tlc-bound3:
+    name: TLC — AuthGateV3 (bound 3)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Download tla2tools.jar
+        working-directory: formal
+        run: |
+          curl -fsSL -o tla2tools.jar \
+            "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar"
+
+      - name: Run TLC
+        working-directory: formal
+        run: |
+          java -XX:+UseParallelGC -jar tla2tools.jar -workers auto -tool MC_AuthGateV3 \
+            2>&1 | tee tlc_nightly_bound3.log
+          grep -q "Model checking completed. No error has been found." tlc_nightly_bound3.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tlc-bound3-log
+          path: formal/tlc_nightly_bound3.log
