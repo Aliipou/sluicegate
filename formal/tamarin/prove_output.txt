@@ -1,0 +1,19 @@
+=== variant: separate-keys, untagged
+  processing time: 1.46s
+  no_forged_delegation (all-traces): verified (6 steps)
+  audit_not_replayable_as_delegation (all-traces): verified (7 steps)
+  no_forged_audit (all-traces): verified (6 steps)
+  deleg_reachable (exists-trace): verified (4 steps)
+=== variant: -DSHAREDKEY
+  processing time: 2.62s
+  no_forged_delegation (all-traces): falsified - found trace (4 steps)
+  audit_not_replayable_as_delegation (all-traces): falsified - found trace (5 steps)
+  no_forged_audit (all-traces): falsified - found trace (4 steps)
+  deleg_reachable (exists-trace): verified (4 steps)
+=== variant: -DSHAREDKEY -DTAGGED
+  processing time: 3.98s
+  no_forged_delegation (all-traces): verified (7 steps)
+  audit_not_replayable_as_delegation (all-traces): verified (8 steps)
+  no_forged_audit (all-traces): verified (7 steps)
+  deleg_reachable (exists-trace): verified (4 steps)
+tamarin-prover 1.12.0

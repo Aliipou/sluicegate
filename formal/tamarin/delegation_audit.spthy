@@ -1,0 +1,85 @@
+/*
+ T10 PILOT (symbolic, Dolev-Yao): key reuse across delegation signatures and audit/decision signatures.
+
+ Variants (select with -D<FLAG>, see README):
+   (none)          SEPARATE keys: delegation key and audit key are distinct (what crypto.rs does:
+                   the decision key is a per-process random key, not the root key). Payloads untagged.
+   -DSHAREDKEY     ONE key signs both, payloads UNTAGGED (arity-4 tuples, as in the Rust byte layouts
+                   which carry no domain tag).
+   -DSHAREDKEY -DTAGGED  ONE key signs both, payloads carry a distinct domain tag.
+
+ Abstractions (NOT verified here): byte layouts are modelled as arity-4 tuples; hashing, epochs,
+ expiry, rights lattice and parent lookup are omitted; the audit signer signs payloads whose first
+ field is adversary-influenced (action_id is a caller-supplied string in crypto.rs::canonical_bytes).
+ Symbolic only: says nothing about EUF-CMA of Ed25519 (that stays the Lean axiom ed25519_euf_cma).
+*/
+theory delegation_audit
+begin
+builtins: signing
+
+#ifdef TAGGED
+macros: delmsg(s,r,g,p) = <'deleg', s, r, g, p>,
+        audmsg(a,b,c,d) = <'audit', a, b, c, d>
+#else
+macros: delmsg(s,r,g,p) = <s, r, g, p>,
+        audmsg(a,b,c,d) = <a, b, c, d>
+#endif
+
+restriction Eq: "All x y #i. Eq(x,y) @ i ==> x = y"
+
+#ifdef SHAREDKEY
+rule Register: [ Fr(~k) ] --[ Reg($A) ]-> [ !DelKey($A,~k), !AudKey($A,~k), !Pk($A,pk(~k)), !PkAud($A,pk(~k)), Out(pk(~k)) ]
+#else
+rule Register: [ Fr(~k), Fr(~j) ] --[ Reg($A) ]->
+  [ !DelKey($A,~k), !AudKey($A,~j), !Pk($A,pk(~k)), !PkAud($A,pk(~j)), Out(pk(~k)), Out(pk(~j)) ]
+#endif
+
+rule Compromise_del: [ !DelKey(A,k) ] --[ Compromised(A) ]-> [ Out(k) ]
+rule Compromise_aud: [ !AudKey(A,k) ] --[ Compromised(A) ]-> [ Out(k) ]
+
+// Delegator signs a delegation the adversary requested (honest issuance).
+rule Issue_delegation:
+  [ !DelKey(D,k), In(<s,r,g,p>) ]
+  --[ IssuedDeleg(D,s,r,g,p) ]->
+  [ Out(sign(delmsg(s,r,g,p), k)) ]
+
+// Kernel signs an audit/decision record; first field (action_id) is adversary-chosen.
+rule Issue_audit:
+  [ !AudKey(A,k), In(<a,b,c,d>) ]
+  --[ IssuedAudit(A,a,b,c,d) ]->
+  [ Out(sign(audmsg(a,b,c,d), k)) ]
+
+// Verifier accepts a delegation iff the signature verifies under D's delegation key.
+rule Accept_delegation:
+  [ !Pk(D,pk), In(<s,r,g,p,sig>) ]
+  --[ Eq(verify(sig, delmsg(s,r,g,p), pk), true), AcceptedDeleg(D,s,r,g,p) ]->
+  []
+
+// Auditor accepts an audit record iff it verifies under A's audit key.
+rule Accept_audit:
+  [ !PkAud(A,pk), In(<a,b,c,d,sig>) ]
+  --[ Eq(verify(sig, audmsg(a,b,c,d), pk), true), AcceptedAudit(A,a,b,c,d) ]->
+  []
+
+// L1: no forged delegation is accepted (unless the delegator's key is compromised).
+lemma no_forged_delegation:
+  "All D s r g p #i. AcceptedDeleg(D,s,r,g,p) @ i ==>
+      (Ex #j. IssuedDeleg(D,s,r,g,p) @ j & j < i) | (Ex #c. Compromised(D) @ c)"
+
+// L2: an accepted delegation is never explained only by an audit issuance: if D has issued an
+// audit record, any accepted delegation still traces to a delegation issuance (or compromise).
+lemma audit_not_replayable_as_delegation:
+  "All D s r g p a b c d #i #j.
+      AcceptedDeleg(D,s,r,g,p) @ i & IssuedAudit(D,a,b,c,d) @ j ==>
+      (Ex #k. IssuedDeleg(D,s,r,g,p) @ k) | (Ex #c. Compromised(D) @ c)"
+
+// L3: a forged audit entry is not accepted (unless compromised), so audit entries are not
+// forgeable by replaying a delegation signature as an audit record either.
+lemma no_forged_audit:
+  "All A a b c d #i. AcceptedAudit(A,a,b,c,d) @ i ==>
+      (Ex #j. IssuedAudit(A,a,b,c,d) @ j & j < i) | (Ex #c. Compromised(A) @ c)"
+
+// Sanity: delegation acceptance is reachable.
+lemma deleg_reachable: exists-trace
+  "Ex D s r g p #i. AcceptedDeleg(D,s,r,g,p) @ i"
+end
