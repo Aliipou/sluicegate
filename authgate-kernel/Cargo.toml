@@ -27,6 +27,10 @@ python   = ["dep:pyo3"]
 wasm     = ["dep:wasm-bindgen"]
 embedded = []
 sandbox  = ["dep:wasmtime"]
+# trace    — T8: emit JSON-lines verify() transitions (see src/tcb/trace.rs and
+#            formal/TraceAuthGateV3.tla). Output dir from env AUTHGATE_TRACE_DIR
+#            (no output if unset). Test/diagnostic only; not for production.
+trace    = []
 
 [dependencies]
 pyo3               = { version = "0.22", features = ["extension-module"], optional = true }

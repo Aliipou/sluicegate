@@ -32,6 +32,9 @@ pub mod consent;
 pub mod dag;
 pub mod types;
 pub(crate) mod engine;
+/// T8: JSON-lines trace emitter for TLA+ trace validation (feature `trace`).
+#[cfg(feature = "trace")]
+pub(crate) mod trace;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

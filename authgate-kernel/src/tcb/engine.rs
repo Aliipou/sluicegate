@@ -30,6 +30,19 @@ pub(crate) fn verify(
     root_key: &VerifyingKey,
     now: u64,
 ) -> Decision {
+    let decision = verify_inner(action, root_key, now);
+    // T8: feature-gated JSON-lines trace of (action, decision) for TLA+ trace
+    // validation. Compiled out entirely unless `--features trace`.
+    #[cfg(feature = "trace")]
+    crate::tcb::trace::record(action, root_key, now, &decision);
+    decision
+}
+
+fn verify_inner(
+    action: &CanonicalAction,
+    root_key: &VerifyingKey,
+    now: u64,
+) -> Decision {
     // ── Layer 1: Canonical gate ──────────────────────────────────────────────
     // Reject tampered IR before touching any proof. Constant-time comparison
     // inside verify_binding() prevents oracle attacks on the hash check.

@@ -109,6 +109,9 @@ ValidChain(leaf, bundle, min_epoch_val) ==
                       /\ Hash(current.issuer_pubkey) = parent.subject_id
                       \* I3: attenuation — child rights ⊆ parent rights
                       /\ current.rights \subseteq parent.rights
+                      \* T8: aligned with dag.rs:83 -- delegated cap must cover the
+                      \* same resource as its parent (resource propagation)
+                      /\ current.resource_hash = parent.resource_hash
                       \* recurse
                       /\ WalkChain(parent, depth + 1, mep)
   IN WalkChain(leaf, 0, min_epoch_val)
@@ -132,14 +135,20 @@ Verify(action, revoked_set_var, now) ==
   IF ~action.binding_valid THEN "Deny"   \* L1: canonical gate
   ELSE
     LET actor_caps == {c \in action.cap_bundle : c.subject_id = action.actor_id}
-        valid_caps == {c \in actor_caps :
+        CapOk(c) ==
           /\ c.resource_hash = action.resource_hash     \* I6
           /\ c.expiry >= now                            \* expiry
           /\ c.epoch >= action.min_epoch                \* I1 leaf epoch
           /\ ValidChain(c, action.cap_bundle, action.min_epoch) \* I2 I3 I7 I8
           /\ action.required_rights \subseteq c.rights  \* rights coverage
-          /\ c.proof_hash \notin revoked_set_var}        \* I4 revocation
-    IN IF valid_caps = {} THEN "Deny" ELSE "Permit"
+        \* T8: aligned with engine.rs:108-115 -- a revoked hash ANYWHERE in the
+        \* bundle (leaf or chain node) denies, not only the leaf.
+        AnyRevoked == \E c \in action.cap_bundle : c.proof_hash \in revoked_set_var  \* I4
+    IN \* T8: aligned with engine.rs:65-101 -- Permit needs at least one actor cap
+       \* AND EVERY actor cap must pass (Rust denies on the first failing actor cap);
+       \* an empty bundle / no actor cap is a Deny (engine.rs:53, 99).
+       IF actor_caps = {} \/ AnyRevoked THEN "Deny"
+       ELSE IF \A c \in actor_caps : CapOk(c) THEN "Permit" ELSE "Deny"
 
 \* ── State variables ─────────────────────────────────────────────────────────
 \*
