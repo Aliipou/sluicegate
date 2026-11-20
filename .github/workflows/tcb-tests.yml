@@ -30,6 +30,10 @@ jobs:
             authgate-kernel/target
           key: ${{ runner.os }}-cargo-${{ hashFiles('authgate-kernel/Cargo.lock') }}
 
+      - name: Assert fiat-crypto backend selected (T4)
+        shell: bash
+        run: sh scripts_check_fiat.sh
+
       - name: Run TCB unit tests
         working-directory: authgate-kernel
         run: cargo test --lib tcb -- --nocapture 2>&1

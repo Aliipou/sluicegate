@@ -434,4 +434,15 @@ mod tests {
         rev.signature = malleate_s(&rev.signature);
         assert!(!verify_revocation_sig(&rev, &sk.verifying_key()));
     }
+
+    #[test]
+    fn revocation_rejects_attack_corpus() {
+        let rev = rev_for(&SigningKey::generate(&mut OsRng));
+        for (a, s) in crate::tcb::t3_redteam::attack_pairs() {
+            let Ok(vk) = VerifyingKey::from_bytes(&a) else { continue };
+            let mut r = rev.clone();
+            r.signature = s;
+            assert!(!verify_revocation_sig(&r, &vk), "revocation accepted {a:?} {s:?}");
+        }
+    }
 }

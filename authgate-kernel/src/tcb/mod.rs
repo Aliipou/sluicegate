@@ -38,3 +38,7 @@ mod tests;
 mod hardening_tests;
 #[cfg(test)]
 mod consent_redteam;
+#[cfg(test)]
+mod t3_redteam;
+#[cfg(test)]
+mod t4_vectors;

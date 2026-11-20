@@ -1,2 +1,7 @@
+[build]
+# T4: select curve25519-dalek's Fiat-Crypto field-arithmetic backend (formally verified field ops).
+# Decompression, point encoding, small-order handling and scalar range checks are NOT covered by Fiat.
+rustflags = ["--cfg", "curve25519_dalek_backend=\"fiat\""]
+
 [target.x86_64-pc-windows-gnu]
 linker = "C:/TDM-GCC-64/bin/gcc.exe"
