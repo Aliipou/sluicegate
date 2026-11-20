@@ -1,0 +1,9 @@
+[package]
+name = "authgate-verus-pilot"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Standalone crate, NOT a workspace member of the TCB build. Run with the verus binary (see README.md).
+[workspace]
+
